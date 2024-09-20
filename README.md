@@ -1,2 +1,2 @@
 # kurdinet
-kürdinet .D
+yapım aşamasında.
