@@ -1,0 +1,2 @@
+# kurdinet
+kürdinet .D
