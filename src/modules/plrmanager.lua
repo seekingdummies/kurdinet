@@ -1,16 +1,18 @@
+-- plrmanager.lua (updated)
+
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Table to store player data
+-- player data tables
 local playerData = {}
 local deathCount = {}
 local respawnCount = {}
 
--- Callbacks for custom events
+-- callbacks
 local onPlayerDeath = function(player, character) end
 local onPlayerRespawn = function(player, character) end
 
--- Function to get all current players
+-- helper functions
 local function getPlayers()
     local plrs = {}
     for _, p in ipairs(Players:GetPlayers()) do
@@ -21,14 +23,12 @@ local function getPlayers()
     return plrs
 end
 
--- Function to get a player's character
 local function getCharacter(player)
-    if player == LocalPlayer then return nil end
     return player.Character
 end
 
--- Function to check if character has Model with 'hitbox'
 local function checkForModel(character)
+    if not character then return nil, false end
     local model = character:FindFirstChild("Model")
     if model then
         local hitbox = model:FindFirstChild("hitbox")
@@ -37,117 +37,82 @@ local function checkForModel(character)
     return nil, false
 end
 
--- Function to monitor Model changes
 local function monitorModel(player, character)
-    if player == LocalPlayer then return end
-    
-    local userId = player.UserId
-    local data = playerData[userId]
+    if not character then return end
+    local data = playerData[player.UserId]
     if not data then return end
-    
-    -- Initial check
+
     local model, hasHitbox = checkForModel(character)
     data.HasModel = model ~= nil
     data.HasHitbox = hasHitbox
     data.Model = model
-    
-    -- Monitor for Model being added
+
     character.ChildAdded:Connect(function(child)
         if child.Name == "Model" then
             local _, hitbox = checkForModel(character)
             data.HasModel = true
             data.HasHitbox = hitbox
             data.Model = child
-            print(player.Name .. " got Model" .. (hitbox and " with hitbox" or ""))
         end
     end)
-    
-    -- Monitor for Model being removed
     character.ChildRemoved:Connect(function(child)
         if child.Name == "Model" then
             data.HasModel = false
             data.HasHitbox = false
             data.Model = nil
-            print(player.Name .. " lost Model")
         end
     end)
-    
-    -- Monitor hitbox changes if Model exists
     if model then
         model.ChildAdded:Connect(function(child)
             if child.Name == "hitbox" then
                 data.HasHitbox = true
-                print(player.Name .. " got hitbox")
             end
         end)
-        
         model.ChildRemoved:Connect(function(child)
             if child.Name == "hitbox" then
                 data.HasHitbox = false
-                print(player.Name .. " lost hitbox")
             end
         end)
     end
 end
 
--- Function to handle character spawning
 local function onCharacterAdded(player, character)
-    if player == LocalPlayer then return end
-    
-    print(player.Name .. " spawned")
-    playerData[player.UserId].Character = character
-    playerData[player.UserId].IsAlive = true
-    playerData[player.UserId].HasModel = false
-    playerData[player.UserId].HasHitbox = false
-    playerData[player.UserId].Model = nil
-    
+    local data = playerData[player.UserId]
+    if not data then return end
+
+    data.Character = character
+    data.IsAlive = true
+    data.HasModel = false
+    data.HasHitbox = false
+    data.Model = nil
+
     respawnCount[player.UserId] = (respawnCount[player.UserId] or 0) + 1
-    
-    -- Wait for character to load fully
+
+    -- wait for humanoid
     local humanoid = character:WaitForChild("Humanoid", 5)
     if not humanoid then return end
-    
-    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
-    if not rootPart then return end
-    
-    -- Monitor for Model changes
+
     monitorModel(player, character)
-    
-    -- Call custom respawn callback
-    pcall(function()
-        onPlayerRespawn(player, character)
-    end)
-    
-    -- Handle character death
+
+    pcall(function() onPlayerRespawn(player, character) end)
+
     humanoid.Died:Connect(function()
-        if player == LocalPlayer then return end
-        
-        print(player.Name .. " died")
+        data.IsAlive = false
+        data.HasModel = false
+        data.HasHitbox = false
+        data.Model = nil
         deathCount[player.UserId] = (deathCount[player.UserId] or 0) + 1
-        playerData[player.UserId].IsAlive = false
-        playerData[player.UserId].HasModel = false
-        playerData[player.UserId].HasHitbox = false
-        playerData[player.UserId].Model = nil
-        playerData[player.UserId].LastDeathTime = tick()
-        
-        -- Call custom death callback
-        pcall(function()
-            onPlayerDeath(player, character)
-        end)
+        data.LastDeathTime = tick()
+        pcall(function() onPlayerDeath(player, character) end)
     end)
 end
 
--- PlayerAdded event
+-- player events
 Players.PlayerAdded:Connect(function(player)
-    if player == LocalPlayer then return end
-    
-    print(player.Name .. " joined")
-    
-    -- Initialize player data
     playerData[player.UserId] = {
         Player = player,
-        Character = nil,
-        IsAlive = false,
+        Character = player.Character,
+        IsAlive = player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 or false,
         LastDeathTime = 0,
         HasModel = false,
         HasHitbox = false,
@@ -155,31 +120,23 @@ Players.PlayerAdded:Connect(function(player)
     }
     deathCount[player.UserId] = 0
     respawnCount[player.UserId] = 0
-    
-    -- Handle current character if it exists
+
     if player.Character then
         onCharacterAdded(player, player.Character)
     end
-    
-    -- Handle future character spawns
+
     player.CharacterAdded:Connect(function(character)
         onCharacterAdded(player, character)
     end)
 end)
 
--- PlayerRemoving event
 Players.PlayerRemoving:Connect(function(player)
-    if player == LocalPlayer then return end
-    
-    print(player.Name .. " left")
-    
-    -- Clean up player data
     playerData[player.UserId] = nil
     deathCount[player.UserId] = nil
     respawnCount[player.UserId] = nil
 end)
 
--- Initialize for players already in game (excluding LocalPlayer)
+-- initialize existing players
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         playerData[player.UserId] = {
@@ -193,21 +150,20 @@ for _, player in ipairs(Players:GetPlayers()) do
         }
         deathCount[player.UserId] = 0
         respawnCount[player.UserId] = 0
-        
+
         if player.Character then
             onCharacterAdded(player, player.Character)
         end
-        
         player.CharacterAdded:Connect(function(character)
             onCharacterAdded(player, character)
         end)
     end
 end
 
--- Utility functions
+-- utility functions
 local function getAllPlayerCharacters()
     local chars = {}
-    for userId, data in pairs(playerData) do
+    for _, data in pairs(playerData) do
         if data.Character and data.IsAlive then
             table.insert(chars, data.Character)
         end
@@ -217,7 +173,7 @@ end
 
 local function getPlayersWithModel()
     local plrs = {}
-    for userId, data in pairs(playerData) do
+    for _, data in pairs(playerData) do
         if data.HasModel and data.IsAlive then
             table.insert(plrs, data.Player)
         end
@@ -227,7 +183,7 @@ end
 
 local function getPlayersWithHitbox()
     local plrs = {}
-    for userId, data in pairs(playerData) do
+    for _, data in pairs(playerData) do
         if data.HasHitbox and data.IsAlive then
             table.insert(plrs, data.Player)
         end
@@ -272,18 +228,17 @@ local function isPlayerAlive(player)
     return data and data.IsAlive or false
 end
 
--- Set custom event callbacks
+-- callbacks
 local function setDeathCallback(callback)
     onPlayerDeath = callback
 end
-
 local function setRespawnCallback(callback)
     onPlayerRespawn = callback
 end
 
-print('[plrmanager] initialized')
+print("[plrmanager] patched and ready")
 
--- Return API
+-- export
 return {
     getPlayers = getPlayers,
     getCharacter = getCharacter,
@@ -296,5 +251,10 @@ return {
     setRespawnCallback = setRespawnCallback,
     playerData = playerData,
     deathCount = deathCount,
-    respawnCount = respawnCount
+    respawnCount = respawnCount,
+
+    -- patched helpers
+    hasModel = hasModel,
+    hasHitbox = hasHitbox,
+    getModel = getModel
 }
