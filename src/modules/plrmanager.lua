@@ -27,6 +27,69 @@ local function getCharacter(player)
     return player.Character
 end
 
+-- Function to check if character has Model with 'hitbox'
+local function checkForModel(character)
+    local model = character:FindFirstChild("Model")
+    if model then
+        local hitbox = model:FindFirstChild("hitbox")
+        return model, hitbox ~= nil
+    end
+    return nil, false
+end
+
+-- Function to monitor Model changes
+local function monitorModel(player, character)
+    if player == LocalPlayer then return end
+    
+    local userId = player.UserId
+    local data = playerData[userId]
+    if not data then return end
+    
+    -- Initial check
+    local model, hasHitbox = checkForModel(character)
+    data.HasModel = model ~= nil
+    data.HasHitbox = hasHitbox
+    data.Model = model
+    
+    -- Monitor for Model being added
+    character.ChildAdded:Connect(function(child)
+        if child.Name == "Model" then
+            local _, hitbox = checkForModel(character)
+            data.HasModel = true
+            data.HasHitbox = hitbox
+            data.Model = child
+            print(player.Name .. " got Model" .. (hitbox and " with hitbox" or ""))
+        end
+    end)
+    
+    -- Monitor for Model being removed
+    character.ChildRemoved:Connect(function(child)
+        if child.Name == "Model" then
+            data.HasModel = false
+            data.HasHitbox = false
+            data.Model = nil
+            print(player.Name .. " lost Model")
+        end
+    end)
+    
+    -- Monitor hitbox changes if Model exists
+    if model then
+        model.ChildAdded:Connect(function(child)
+            if child.Name == "hitbox" then
+                data.HasHitbox = true
+                print(player.Name .. " got hitbox")
+            end
+        end)
+        
+        model.ChildRemoved:Connect(function(child)
+            if child.Name == "hitbox" then
+                data.HasHitbox = false
+                print(player.Name .. " lost hitbox")
+            end
+        end)
+    end
+end
+
 -- Function to handle character spawning
 local function onCharacterAdded(player, character)
     if player == LocalPlayer then return end
@@ -34,6 +97,9 @@ local function onCharacterAdded(player, character)
     print(player.Name .. " spawned")
     playerData[player.UserId].Character = character
     playerData[player.UserId].IsAlive = true
+    playerData[player.UserId].HasModel = false
+    playerData[player.UserId].HasHitbox = false
+    playerData[player.UserId].Model = nil
     
     respawnCount[player.UserId] = (respawnCount[player.UserId] or 0) + 1
     
@@ -43,6 +109,9 @@ local function onCharacterAdded(player, character)
     
     local rootPart = character:WaitForChild("HumanoidRootPart", 5)
     if not rootPart then return end
+    
+    -- Monitor for Model changes
+    monitorModel(player, character)
     
     -- Call custom respawn callback
     pcall(function()
@@ -56,6 +125,9 @@ local function onCharacterAdded(player, character)
         print(player.Name .. " died")
         deathCount[player.UserId] = (deathCount[player.UserId] or 0) + 1
         playerData[player.UserId].IsAlive = false
+        playerData[player.UserId].HasModel = false
+        playerData[player.UserId].HasHitbox = false
+        playerData[player.UserId].Model = nil
         playerData[player.UserId].LastDeathTime = tick()
         
         -- Call custom death callback
@@ -76,7 +148,10 @@ Players.PlayerAdded:Connect(function(player)
         Player = player,
         Character = nil,
         IsAlive = false,
-        LastDeathTime = 0
+        LastDeathTime = 0,
+        HasModel = false,
+        HasHitbox = false,
+        Model = nil
     }
     deathCount[player.UserId] = 0
     respawnCount[player.UserId] = 0
@@ -111,7 +186,10 @@ for _, player in ipairs(Players:GetPlayers()) do
             Player = player,
             Character = player.Character,
             IsAlive = player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 or false,
-            LastDeathTime = 0
+            LastDeathTime = 0,
+            HasModel = false,
+            HasHitbox = false,
+            Model = nil
         }
         deathCount[player.UserId] = 0
         respawnCount[player.UserId] = 0
@@ -135,6 +213,41 @@ local function getAllPlayerCharacters()
         end
     end
     return chars
+end
+
+local function getPlayersWithModel()
+    local plrs = {}
+    for userId, data in pairs(playerData) do
+        if data.HasModel and data.IsAlive then
+            table.insert(plrs, data.Player)
+        end
+    end
+    return plrs
+end
+
+local function getPlayersWithHitbox()
+    local plrs = {}
+    for userId, data in pairs(playerData) do
+        if data.HasHitbox and data.IsAlive then
+            table.insert(plrs, data.Player)
+        end
+    end
+    return plrs
+end
+
+local function hasModel(player)
+    local data = playerData[player.UserId]
+    return data and data.HasModel or false
+end
+
+local function hasHitbox(player)
+    local data = playerData[player.UserId]
+    return data and data.HasHitbox or false
+end
+
+local function getModel(player)
+    local data = playerData[player.UserId]
+    return data and data.Model or nil
 end
 
 local function getPlayerByName(name)
